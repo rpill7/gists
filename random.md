@@ -1,5 +1,70 @@
-1. Concurrency, measured not assumed. "How many documents can we actually process in parallel today? Is the worker one loop or a real pool? Run a batch of 500 mixed documents and report docs-per-hour, plus where the time went: parse, LLM calls, embedding, or database writes."
-2. The queue under pressure. "Our job queue — is it just polling the database? Put 100,000 queued jobs in and report dequeue behavior on SQLite's single-writer lock. Can two workers safely claim jobs without grabbing the same one? What exactly breaks before Postgres, and is every query compatible with both?"
-3. Batching and the gateway ceiling. "Are LLM extraction and embedding calls made one document at a time, or batched with async I/O? What's the gateway's rate limit, what fraction do we use today, and at full permitted rate, how many documents per hour is the theoretical maximum?"
-4. Crash-proof at scale, proven. "Simulate a 10,000-document backfill where workers die mid-run. Show that resume from checkpoint works, count how many documents got reprocessed, and confirm zero duplicate jobs and zero double-booked values. Also: what happens to the backfill counters if two replicas run at once?"
-5. The projection. "Using the cost meter, give cost and wall-clock time per 1,000 documents for our top three doc types, then project the full 2.2 million: total cost, total days at current gateway limits, and what gateway quota we'd need to finish in 30 days."
+The goal in one line
+
+Make one worker fast and the queue safe for many workers — without changing what
+gets booked or withheld, on either backend (SQLite locally, Postgres on Kubernetes).
+
+Outcome 1 — Parallel LLM and embedding calls on the live path
+
+Today extraction and embedding calls leave one at a time, and the concurrency and
+rate-limit settings in config exist but control nothing on the real path.
+
+Done means: the live pipeline makes multiple LLM calls in flight at once, bounded
+by the existing config settings; embedding requests are batched rather than sent one
+string at a time; gateway errors and rate responses back off gracefully.
+(Hint, optional: bounded async dispatch. Your call how.)
+
+Proof: a 500-doc mixed batch shows at least 4x throughput vs the current baseline, (but we can actually write a test file and hit the LLM gateway and figure out what could be the max. )
+AND the eval set produces byte-identical booked/withheld outcomes before and after.
+Concurrency is transport, never semantics — if outcomes differ at all, the change is wrong.
+
+Outcome 2 — A queue that two workers can share safely
+
+Today claiming a job is two separate steps, so two workers can grab the same job.
+
+Done means: claiming a job is atomic on BOTH backends through one interface, and
+the database itself refuses to let one job have two active processing runs — safety
+must not depend on worker politeness.
+(Hint, optional: a single-statement claim-and-return works on both engines; Postgres
+has a stronger variant. Pick what fits the storage layer you find.)
+
+Proof: two workers against one queue chew through a 1,000-job batch with zero
+double-processed jobs, verified from the audit chain, on both backends.
+
+Outcome 3 — Backfills that survive death with visible progress
+
+A checkpoint function exists but is wired to a path nothing uses.
+
+Done means: a large backfill records its progress as it goes on the real path;
+kill it mid-run and it resumes where it left off, and a human can see how far along
+it is at any moment.
+
+Proof: kill a 10,000-doc test backfill partway; on restart it resumes from the
+cursor, reprocesses nothing already completed, and progress reporting is correct.
+
+Outcome 4 — A cost meter that can answer the December question
+
+Today we can't split cost by stage, embeddings aren't metered, and parse has no
+dollar figure.
+
+Done means: per-job cost records distinguish parse vs extraction vs re-extraction
+vs embedding, embeddings are metered, and a per-doc-type report can project cost and
+duration for the 2.2M backfill from real numbers.
+
+Proof: the cost report for a test batch shows the per-stage breakdown, including
+embeddings, and the projection query runs from recorded data alone.
+
+Fences (do not cross)
+
+
+No new infrastructure, no extra workers, no new services in this task.
+Verification gates, their order, and withhold behavior are untouchable.
+Every change must work on SQLite and Postgres through the existing backend switch.
+If you need something you don't have (gateway rate limits, real sample volume),
+STOP and ask — never invent numbers.
+
+
+Working loop
+
+Read brief → read code → implement one outcome at a time in the order above →
+write and run its proof as an automated test → fix until green → run the full
+regression suite → commit on branch task-21 → summarize what you chose and why.
