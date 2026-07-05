@@ -1,70 +1,52 @@
-The goal in one line
+# Task 22 — Deterministic CI + schema guard (outcome brief)
 
-Make one worker fast and the queue safe for many workers — without changing what
-gets booked or withheld, on either backend (SQLite locally, Postgres on Kubernetes).
+You are executing exactly ONE task. Read AGENT_DIRECTIONS.md first — hard rules and
+the platform boundary always win. Read the code, choose the implementation yourself.
+This brief defines OUTCOMES and PROOF. Techniques mentioned are hints, not orders.
 
-Outcome 1 — Parallel LLM and embedding calls on the live path
+## The goal in one line
+A red test must always mean something is broken, and a worker must never run against
+a database whose shape it doesn't recognize.
 
-Today extraction and embedding calls leave one at a time, and the concurrency and
-rate-limit settings in config exist but control nothing on the real path.
+## Outcome 1 — CI never talks to the live gateway
+Today the test suite calls the real LLM, so results vary run to run
+(test_12_kyc_tax_forms flakes for exactly this reason).
 
-Done means: the live pipeline makes multiple LLM calls in flight at once, bounded
-by the existing config settings; embedding requests are batched rather than sent one
-string at a time; gateway errors and rate responses back off gracefully.
-(Hint, optional: bounded async dispatch. Your call how.)
+**Done means:** the merge-blocking test suite runs fully offline against recorded or
+fixture responses — same input, same output, every single time. Live-gateway runs
+still exist, but only as the on-demand benchmark mode (Task 2's third mode); they
+never block a merge. The flaky test becomes deterministic.
+(Hint, optional: a record-once/replay layer at the gateway client boundary.)
 
-Proof: a 500-doc mixed batch shows at least 4x throughput vs the current baseline, (but we can actually write a test file and hit the LLM gateway and figure out what could be the max. )
-AND the eval set produces byte-identical booked/withheld outcomes before and after.
-Concurrency is transport, never semantics — if outcomes differ at all, the change is wrong.
+**Fence:** fixture documents and recorded responses must be SYNTHETIC — no real
+client names, TINs, or values may be committed anywhere. If existing test docs are
+real client data, stop and ask.
 
-Outcome 2 — A queue that two workers can share safely
+**Proof:** the full CI suite passes twice in a row with network access disabled,
+producing identical results both times; the previously flaky test passes 10/10 runs.
 
-Today claiming a job is two separate steps, so two workers can grab the same job.
+## Outcome 2 — Versioned migrations + a schema guard at startup
+The corporate Postgres jobs table is missing case_label — schema changes are not
+traveling with the code.
 
-Done means: claiming a job is atomic on BOTH backends through one interface, and
-the database itself refuses to let one job have two active processing runs — safety
-must not depend on worker politeness.
-(Hint, optional: a single-statement claim-and-return works on both engines; Postgres
-has a stronger variant. Pick what fits the storage layer you find.)
+**Done means:** schema changes live as ordered, versioned migrations that bring ANY
+environment (fresh or existing, SQLite or Postgres) to the current version without
+losing data. And the startup checks from Task 20 gain one more gate: on boot, the
+worker compares the database schema version to what the code expects — on mismatch
+it refuses to accept jobs and says exactly which migration is missing.
 
-Proof: two workers against one queue chew through a 1,000-job batch with zero
-double-processed jobs, verified from the audit chain, on both backends.
+**Fence:** never auto-migrate a production database silently at startup — the guard
+REPORTS and refuses; applying migrations is an explicit, human-invoked command.
 
-Outcome 3 — Backfills that survive death with visible progress
+**Proof:** a fresh SQLite DB and a fresh Postgres DB migrate to the same version and
+pass the suite; a deliberately stale DB makes the worker refuse jobs with a clear,
+named error; migrating an existing DB with data preserves every row.
 
-A checkpoint function exists but is wired to a path nothing uses.
+## Out of scope (human decisions, not yours)
+- The repo policy that gitignores tests/ — flag it in NOTES.md, do not change it.
+- Running anything against shared/corporate infrastructure — stop and ask first.
 
-Done means: a large backfill records its progress as it goes on the real path;
-kill it mid-run and it resumes where it left off, and a human can see how far along
-it is at any moment.
-
-Proof: kill a 10,000-doc test backfill partway; on restart it resumes from the
-cursor, reprocesses nothing already completed, and progress reporting is correct.
-
-Outcome 4 — A cost meter that can answer the December question
-
-Today we can't split cost by stage, embeddings aren't metered, and parse has no
-dollar figure.
-
-Done means: per-job cost records distinguish parse vs extraction vs re-extraction
-vs embedding, embeddings are metered, and a per-doc-type report can project cost and
-duration for the 2.2M backfill from real numbers.
-
-Proof: the cost report for a test batch shows the per-stage breakdown, including
-embeddings, and the projection query runs from recorded data alone.
-
-Fences (do not cross)
-
-
-No new infrastructure, no extra workers, no new services in this task.
-Verification gates, their order, and withhold behavior are untouchable.
-Every change must work on SQLite and Postgres through the existing backend switch.
-If you need something you don't have (gateway rate limits, real sample volume),
-STOP and ask — never invent numbers.
-
-
-Working loop
-
-Read brief → read code → implement one outcome at a time in the order above →
-write and run its proof as an automated test → fix until green → run the full
-regression suite → commit on branch task-21 → summarize what you chose and why.
+## Working loop
+Read brief → read code → implement one outcome at a time → write and run its proof
+as an automated test → fix until green → run the full regression suite → commit on
+branch task-22 → summarize what you chose and why.
