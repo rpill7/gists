@@ -1,43 +1,98 @@
-Here's the thing to know before you paste anything: your agent doesn't need to touch the backend at all. This whole feature lives in the chat page component. So the prompt just needs to describe the behavior really precisely, because that's where agents usually mess up — they build a rail that looks right but jumps to the wrong message or flickers on scroll.
+Build the Seller Reports landing-page calendar default. Do not wait for more spec. Find the month picker in THIS tree (the office tree has drifted; do not assume laptop paths) and wire this rule.
 
-Here's what I'd tell it, copy-paste ready:
+## What this is
 
----
+The month picker is "which month of data are we looking at," not "when did someone last touch the file."
 
-**Add a conversation minimap to the chat page (like ChatGPT's).**
+Today it likely defaults to the current calendar month. That is wrong. Seller-report data for a month is only done on the 15th of the month two months later. Example: July data is done on 15 September. Until that day, open on July. From that day, open on August.
 
-Build a vertical rail of horizontal tick marks, fixed to the right edge of the chat scroll area, overlaying the content. One tick per **user** message in the conversation (ignore assistant messages).
+A person can still pick any other month. This rule is only the default when the screen first opens.
 
-**Structure:**
-1. Give every user message container a ref (or a stable `id` like `msg-{index}` on the DOM node).
-2. The rail is absolutely positioned inside the chat panel: `right: 0`, vertically centered, sitting above the content (`z-index` above messages, below modals). It should span between the top bar and the composer, never overlapping either.
-3. Ticks are **evenly spaced** top to bottom (do NOT position them proportionally to scroll height — long answers would squish them together). Each tick: ~16px wide, 3px tall, rounded, muted gray at ~50% opacity.
+## The rule (exact)
 
-**Scroll tracking (active state):**
-4. Attach a scroll listener (passive) to the chat scroll container. On scroll, find the last user message whose `offsetTop <= scrollTop + ~120px`. That message is "active."
-5. The active tick gets the accent color, grows to ~26px wide, and gets a subtle glow. Use a CSS transition (~180ms) so it animates as you scroll. Debounce or use rAF so it doesn't thrash.
+Use the user's local calendar date (year, month, day of month). Do not use UTC. Do not use the server clock if the UI already has a local "today."
 
-**Hover flyout:**
-6. When the cursor enters the rail's hover zone (make the hit area ~44px wide, wider than the ticks themselves, so it's easy to reach), expand a flyout panel to the left of the ticks: dark translucent background with backdrop blur, rounded corners, drop shadow, ~290px wide, max-height capped with internal scroll.
-7. The flyout lists every user prompt in order: a small monospace index number (01, 02, …) plus the prompt text truncated to **2 lines** with ellipsis (`-webkit-line-clamp: 2`).
-8. Hovering a row highlights it and also highlights its matching tick. The currently active message's row is visually marked (accent tint + brighter text).
-9. Moving the mouse out of the rail zone closes the flyout (~180ms fade). No click needed to open or close.
+Let today = (Y, M, D) where M is 1–12.
 
-**Click to jump:**
-10. Clicking a tick OR a flyout row smooth-scrolls the chat container so that message's top sits ~24px below the top of the viewport (`scrollTo({ top: node.offsetTop - 24, behavior: "smooth" })`).
-11. After jumping, briefly highlight the target user bubble (e.g., a soft accent ring for ~1.5s) so the eye lands on it.
+if D < 15:
+    default = (Y, M) minus 2 months
+else:   # D is 15 or later, including the last day of the month
+    default = (Y, M) minus 1 month
 
-**Edge cases:**
-- Fewer than 2 user messages → don't render the rail at all.
-- Very long conversations (30+ messages) → cap tick spacing so they don't overflow; the flyout scrolls internally.
-- New message sent → rail updates, new tick becomes active, no layout jump.
-- The rail must not block text selection or interfere with the native scrollbar; keep it inside the padding gutter (add ~40px right padding to the message column so bubbles never sit under it).
-- Respect `prefers-reduced-motion`: use instant scroll instead of smooth.
+When subtracting months, wrap the year:
 
-Use our existing theme tokens for all colors — no hardcoded hex values.
+- month 1 minus 1 → December of previous year
+- month 1 minus 2 → November of previous year
+- month 2 minus 2 → December of previous year
 
----
+Return a year-month only (YYYY-MM or whatever this app already uses for the picker). Never a day.
 
-That last line matters if you're also doing the theme system, since the rail should recolor with everything else. And one practical tip: have the agent build it as its own component, something like `<ConversationMinimap messages={userMessages} scrollRef={chatScrollRef} />`, so it stays isolated and you can drop it into the page without tangling it into your message rendering.
+Equivalent one-liner: offset = 2 if D < 15 else 1; default = current month minus offset.
 
-Want me to write the theme system prompt too, or are you starting with just this one?
+## Why (so you do not "simplify" it)
+
+July's report is finished on 15 September. So:
+
+- 1 Sep through 14 Sep → July   (current minus 2)
+- 15 Sep through 30 Sep → August (current minus 1)
+- 1 Oct through 14 Oct → August  (current minus 2)
+- 15 Oct through 31 Oct → September (current minus 1)
+
+It automatically stays on the same reporting month across the 1st of the next month, then flips again on the 15th.
+
+## Must-pass examples (freeze "today" in tests; do not depend on the real clock)
+
+| Frozen today     | Default month |
+| ---------------- | ------------- |
+| 2026-09-14       | 2026-07       |
+| 2026-09-15       | 2026-08       |
+| 2026-09-16       | 2026-08       |
+| 2026-09-30       | 2026-08       |
+| 2026-10-01       | 2026-08       |
+| 2026-10-14       | 2026-08       |
+| 2026-10-15       | 2026-09       |
+| 2026-01-14       | 2025-11       |
+| 2026-01-15       | 2025-12       |
+| 2026-03-14       | 2026-01       |
+| 2026-03-15       | 2026-02       |
+| 2026-02-14       | 2025-12       |
+| 2026-02-15       | 2026-01       |
+
+15th is inclusive: on the 15th, use minus 1, not minus 2.
+
+## How to implement in this repo
+
+1. Find the Seller Reports landing page month picker / calendar control. Search for month filter, reporting period, DatePicker with month view, YYYY-MM, current month default.
+2. Put the rule in one small pure function, e.g. defaultReportingMonth(today) → year-month. No React, no fetch, no store inside it. Easy to unit test.
+3. On first load, if no month is already chosen, call that function and set the picker + the deal grid to that month.
+4. If the URL (or existing routing) already has a month, keep that month. Deep links from KME win over the default.
+5. After load, changing the picker still works as today. Do not lock the picker. Do not hide other months.
+6. Match existing date format and state (YYYY-MM vs Date vs {year, month}). Do not invent a second month field.
+
+## Do not do
+
+- Do not change last-modified / last-updated. That is "when the report was last touched in our app," which can be 14 Sep while the picker shows July.
+- Do not change report status, hover actions, search, or columns.
+- Do not fetch KME to decide the default month. This is a date rule only.
+- Do not default to "today" or "current month."
+- Do not use day-of-month 15 as a reporting month. The result has no day.
+- Do not refactor unrelated landing-page code.
+
+## Tests
+
+Add a focused unit test of the pure function with every row in the table above. Freeze the date; do not read the real clock.
+
+If this repo uses `tests/_harness.py` + `make test-one TEST=...`, follow that. If the month picker lives in the frontend, add the matching frontend unit test next to the function.
+
+## Done looks like
+
+- Opening Seller Reports with no month in the URL shows the default month from the rule, not the current calendar month.
+- On a frozen 14 Sep 2026 it shows July 2026. On a frozen 15 Sep 2026 it shows August 2026.
+- Picking another month still filters the grid.
+- A URL that already names a month still opens on that month.
+
+Reply with:
+1. Files you changed (real paths on this machine)
+2. The function you added (name + signature)
+3. Test command and pass/fail
+4. Where the landing page reads the default (file + a short note)
