@@ -7,4 +7,8 @@ cd Bonsai-demo
 ./scripts/start_llama_server.sh
 
 
+
+
 ollama pull aratan/Ternary-Bonsai-2-27B-gguf:TQ1_0
+
+ollama run aratan/Ternary-Bonsai-2-27B-gguf:TQ1_0
