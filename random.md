@@ -5,3 +5,6 @@ git clone https://github.com/PrismML-Eng/Bonsai-demo.git
 cd Bonsai-demo
 ./setup.sh
 ./scripts/start_llama_server.sh
+
+
+ollama pull aratan/Ternary-Bonsai-2-27B-gguf:TQ1_0
