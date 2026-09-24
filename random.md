@@ -1093,3 +1093,307 @@ final cleanup check
 The expected end result is simple:
 
 The requested changes are tested and safely on my local branch. Temporary successful work has been cleaned up. Failed work is kept only when useful. GitHub changes happen only when I explicitly approve them.
+
+
+
+
+
+Yes — this format is much better. You want the notes organized by topic → logic → exact rules/tasks, rather than a long project summary. I’d structure the entire discussion like this:
+
+Processing Status Logic
+
+* The landing page gets the deal rows from KME, but Processing Status is calculated by the DIP application using Postgres data.
+    * For each deal + selected month:
+        1. Check the completed-processing table.
+            * If a completed record exists → Processing Status = COMPLETED
+        2. If no completed record exists, check whether a mapping exists.
+            * If mapping exists → Processing Status = NOT STARTED
+            * If mapping does not exist → Processing Status = MAPPING REQUIRED
+* Identifiers needed for the logic:
+    1. Check A: Has this report already been processed?
+        * Use Master Deal ID + Month
+        * The completed-processing table already stores this information.
+        * If a row exists for that combination → Completed
+    2. Check B: Does a mapping exist?
+        * If the completed record does not exist, check the mapping store using the identifiers required by Anish’s mapping implementation.
+        * This includes the CSRT Template ID / Version information discussed.
+        * These values do not need to be displayed on the landing page.
+* Processing Status drives the actions available to the user:
+    * Mapping Required → Set Up Mapping
+    * Not Started → Create Monthly Seller Report
+    * Completed → View / Download / Delete
+    * Not Applicable → Future use when inactive/completed deals are exposed
+
+⸻
+
+Landing Page Changes
+
+* Rename Securitization → Seller Report.
+* Rename AI Processing Status → Processing Status.
+* Keep Processing Status visible directly in the table instead of requiring hover.
+* Last Modified
+    * Display the full timestamp received from the service.
+* Last Modified By
+    * Display the value received from the source data.
+* Last Seller Report
+    * Update the display based on the agreed month/report format.
+* Remove unnecessary/default columns discussed during the meeting.
+* Remove the Skills section based on the latest design.
+* User authentication must flow through correctly so the application knows the logged-in user.
+* Confirm QA/Aiden AD-group access for testers.
+* Confirm whether QA uses the same AD group with a different endpoint.
+
+⸻
+
+Mapping Integration
+
+* Do not depend on MCP to return an is_mapping_available flag.
+* The DIP application already has Postgres access, so it should perform the mapping check directly.
+* This avoids requiring the MCP service to connect to the separate Postgres service.
+* Work with Anish to determine exactly which columns/IDs his mapping lookup requires.
+* Initially, the integration only needs to answer:
+    * Does a mapping exist? Yes/No
+* We do not need to retrieve the entire mapping just to calculate Processing Status.
+
+⸻
+
+Mapping Setup Flow
+
+* When Processing Status = Mapping Required:
+    * Action should show Set Up Mapping.
+* Clicking Set Up Mapping opens Anish’s mapping screen.
+* Pass the information already available from the landing-page response:
+    * Deal information
+    * Template information
+    * Template version
+    * Required CSRT/template identifiers
+* The user should not manually select the template.
+* Mapping setup flow:
+    1. Show the deal being mapped.
+    2. Show the existing template and template version.
+    3. Allow the user to provide up to the previous 6 monthly PDFs.
+    4. Use the latest report for the initial field/name matching.
+    5. Use the additional historical reports to compare values and improve the mapping.
+    6. Present the suggested mapping for human review.
+    7. User confirms/finalizes the mapping.
+    8. Save the mapping.
+    9. Processing Status can then move from Mapping Required → Not Started.
+* Mapping is generally a one-time activity until the template changes.
+
+⸻
+
+Create Monthly Seller Report Flow
+
+* When a mapping exists but the report has not been processed:
+    * Processing Status = Not Started
+    * Action = Create Monthly Seller Report
+* Flow:
+    1. User selects Create Monthly Seller Report.
+    2. Upload Seller Report PDF.
+    3. Show processing/progress.
+    4. Run document processing.
+    5. Apply the existing mapping.
+    6. Populate the Excel/template.
+    7. Save the completed-processing information.
+    8. Refresh the landing page.
+    9. Processing Status becomes Completed.
+
+⸻
+
+Processing Status vs Report Status
+
+* These are separate values.
+* Processing Status
+    * Owned/derived by our processing application.
+    * Mapping Required
+    * Not Started
+    * Completed
+* Report Status
+    * Comes from KME.
+    * Example: Draft / Finalized.
+* A valid state can therefore be:
+
+Processing Status = Completed
+Report Status = Draft
+
+* This means our processing is finished, but the user is still reviewing the report.
+* When the user finalizes the report in the existing process, the Report Status should sync back from KME.
+
+⸻
+
+Actions Column
+
+* Actions must change based on the current state.
+* Do not leave confusing blank spaces where actions would normally appear.
+* Actions discussed:
+    * Set Up Mapping
+    * Create Monthly Seller Report
+    * View
+    * Download
+    * Delete
+* Completed reports
+    * User should be able to download the generated Excel directly from the landing page.
+    * User should also be able to delete the processed report if they need to reprocess it.
+* Delete is required because:
+    * A user may receive an updated Seller Report after already processing the first version.
+    * They need to delete the existing result and process the newer file again.
+
+⸻
+
+3-Panel View Cleanup
+
+* Remove business-user noise:
+    * Raw JSON
+    * Raw technical output
+    * Unnecessary mapper information
+    * Unnecessary “all extracted fields” views
+    * Editing options that are no longer needed
+* Keep the screen focused on:
+    * Source PDF
+    * Extracted/mapped values
+    * Excel/template values
+* Use the field names already produced by Anish’s mapping implementation rather than recreating the naming logic.
+
+⸻
+
+Excel Template Retrieval
+
+* Both the Seller Report flow and Anish’s mapping flow require the correct empty Excel template.
+* Use the template information already available:
+    * Template ID
+    * Template version
+    * Template/file name
+* Need to confirm the common backend method for retrieving the Excel binary.
+* Avoid implementing two separate ways of retrieving the same template.
+* Downloaded Excel must preserve macros.
+* Initial testing indicated that the binary download preserves the macros.
+
+⸻
+
+Excel Performance Testing
+
+* Test a realistic workbook with macros enabled.
+* Determine whether enabling macros causes large historical tabs/data to load and slow down the experience.
+* For now, do not redesign this.
+* First verify actual behavior and performance.
+* If large workbooks become slow, then decide which sheets/data should actually be rendered in the application.
+
+⸻
+
+Caching Logic
+
+* Historical months can continue to use caching.
+* The default month should NOT be cached.
+* Reason:
+    * Users will actively process reports during that month.
+    * Processing Status can change within minutes.
+    * A 10–20 minute cache could show stale information.
+* Logic:
+
+Default month
+→ Always fetch fresh data
+Previous month
+→ Cached response is okay
+
+* Use the term default month, not current month.
+
+⸻
+
+Previous Reports
+
+* Do not change this section yet.
+* Previous Reports needs a separate design discussion with Erika.
+* Requirement eventually needs to support:
+    * AI-processed historical reports
+    * Reports created before the AI process existed
+    * Final Excel downloads
+    * Possibly month/calendar-based navigation
+    * Possibly upload of older reports
+* Park this work until the updated design is available.
+
+⸻
+
+Phase 1 vs Future Flow
+
+* Phase 1
+    * User manually uploads the PDF.
+    * Processing occurs after upload.
+    * Current UI flow is acceptable.
+* Future phase
+    * User should not have to upload the Seller Report manually.
+    * System identifies the incoming Seller Report automatically.
+    * File enters the processing queue.
+    * Processing happens in the background.
+    * User eventually sees that the monthly report is ready.
+* Future work will need to determine:
+    * Where files arrive
+    * How the correct Seller Report is identified
+    * File naming/pattern rules
+    * Kafka/Solace or other intake mechanism
+* This is not required for the immediate delivery.
+
+⸻
+
+Testing / Shravanti
+
+* Give Shravanti access to the Seller Report QA environment.
+* Provide the required AD group.
+* Give her approximately one day to validate the landing page.
+* Initial landing-page testing should verify:
+    * Deal rows
+    * Columns
+    * Dates
+    * Processing Status
+    * Report Status
+    * Actions
+    * Authentication
+    * Month switching
+* She should also be able to test through the use-case-specific API/Swagger page while UI work is still happening.
+
+⸻
+
+Use-Case-Specific Swagger
+
+* Do not expose hundreds of unrelated Document Processing Engine endpoints to Seller Report testers.
+* Provide a Seller Report/use-case-specific Swagger view.
+* Only expose the useful operations, such as:
+    * Process/upload
+    * Job status/result
+    * Extract
+    * Mapping-related operations
+* Access can be controlled through the use-case/token identity.
+
+⸻
+
+Capacity Planning
+
+* Send capacity requirements to Vishal for both Day 1 and target state.
+
+Item	Day 1	Target State
+Average documents/day	~50	~100
+Concurrent users	~10	~20–30
+Documents/month	~250	~500
+Typical document size	~2–5 MB	~2–5 MB
+Planning max size	~5–10 MB	~5–10 MB
+
+* Document Processing Engine capacity is shared with other use cases.
+* Other teams may send significantly larger workloads, including historical loads.
+* Existing queue/rate controls should prevent one use case from consuming all processing capacity.
+
+⸻
+
+Immediate Task Order
+
+1. Finish landing-page changes.
+2. Build Processing Status logic.
+3. Sit with Anish and connect the mapping check.
+4. Finalize dynamic Actions.
+5. Add Download/Delete/reprocess behavior.
+6. Confirm Excel template retrieval.
+7. Update default-month caching behavior.
+8. Give Shravanti access and start landing-page testing.
+9. Send capacity numbers to Vishal.
+10. Move to the 3-panel view.
+11. Leave Previous Reports and the future automatic ingestion flow for the next phase.
+
+This is the format I’d use for the email/meeting notes because someone can read each heading independently and immediately understand what was decided, what the logic is, and what still needs to be done.
