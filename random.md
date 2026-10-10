@@ -1081,3 +1081,16 @@ Do not begin making changes until the initial investigation is complete and the 
 
 -----------
 \
+
+One additional requirement before implementation: DIP is a consumer-based platform, and each use case can bring its own services, credentials, and extensions.
+Our existing startup logs already identify service bindings such as llm_gateway=own, object_store=own, llamaparse=default, and mcp_deal_master=own.
+I want the logging design to account for these service bindings as well.
+Please review how DIP resolves consumer-specific versus shared services, including LLM Gateway, S3, Postgres or other databases, LlamaParse, MCP, and registered extensions.
+Where appropriate, automatically include service, service_binding, and service_name in service-related logs.
+The goal is to identify which consumer initiated the operation, which service was actually used, and whether it was consumer-provided or shared.
+Please distinguish configured services from services actually invoked. Reuse existing service-binding information rather than creating a separate registry.
+Do not add every configured service to every log line. Only include service information when relevant.
+Ensure this works with concurrent consumers, background workers, and service calls that happen outside the initial API request.
+Avoid logging credentials, connection strings, sensitive endpoints, or document contents.
+Keep this compatible with our existing structured JSON logger and Grafana.
+Before implementing, assess whether this can be added cleanly to your proposed logging approach. If it requires significant changes, explain the trade-offs and recommend whether it belongs in this release or a later one.
