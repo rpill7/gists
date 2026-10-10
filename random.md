@@ -1081,3 +1081,34 @@ Do not begin making changes until the initial investigation is complete and the 
 
 -----------
 \
+
+
+I reviewed your analysis and agree with the proposed approach. Since DIP already has centralized structured logging, use-case resolution, and job-level identity storage, let's reuse the existing foundation rather than introducing another logging framework.
+
+Before implementation, please incorporate the following requirements:
+
+1. **Context isolation:** Ensure use-case, request, job, and operation context never leaks between concurrent requests or background jobs. Context must be restored and cleared safely, including failures, retries, and cancellations.
+
+2. **Full request/job correlation:** Automatically include `use_case`, `request_id`, `job_id`, and `operation_id` wherever available. Reuse existing identifiers rather than creating duplicates.
+
+3. **Validated identity:** Attach the resolved, authorized use case rather than blindly trusting the incoming `x-dip-scope` header. Verify where authentication and scope resolution happen before choosing the integration point.
+
+4. **Structured logging:** Preserve the existing JSON format and add context as separate fields, not only as prefixes inside messages. Maintain readable terminal output and backward compatibility.
+
+5. **Background workers:** Restore logging context from the persisted job record whenever a worker picks up or resumes a job. Confirm this works across process boundaries and restarts.
+
+6. **Extensions:** Reuse DIP's existing logging helper. Check whether extensions can automatically receive a context-aware logger through the existing registration mechanism, without introducing unnecessary changes.
+
+7. **Polling noise:** Reduce repetitive successful Uvicorn operation-polling logs, but retain failures, slow requests, and unexpected responses. Make the behavior configurable.
+
+8. **Security:** Ensure logs never expose credentials, tokens, sensitive document content, or extracted personal information.
+
+9. **Testing:** Add focused tests for concurrent Securitization/KYC requests, background processing, context cleanup, missing context, failures, JSON output, and existing logging behavior.
+
+10. **Scope control:** Keep changes small and inside the appropriate foundation modules. Do not introduce use-case-specific logic into DIP core. Avoid new dependencies or infrastructure.
+
+Also, you mentioned six files using logging methods that bypass the existing formatter. Please verify those findings and fix them only if they are directly relevant to this change. Keep unrelated issues separate.
+
+Go ahead and implement the recommended approach with these requirements. Run the relevant tests and provide a summary of the files changed, test results, any remaining limitations, and example terminal/JSON output.
+
+Do not push or merge the changes automatically.
