@@ -1082,15 +1082,125 @@ Do not begin making changes until the initial investigation is complete and the 
 -----------
 \
 
-One additional requirement before implementation: DIP is a consumer-based platform, and each use case can bring its own services, credentials, and extensions.
-Our existing startup logs already identify service bindings such as llm_gateway=own, object_store=own, llamaparse=default, and mcp_deal_master=own.
-I want the logging design to account for these service bindings as well.
-Please review how DIP resolves consumer-specific versus shared services, including LLM Gateway, S3, Postgres or other databases, LlamaParse, MCP, and registered extensions.
-Where appropriate, automatically include service, service_binding, and service_name in service-related logs.
-The goal is to identify which consumer initiated the operation, which service was actually used, and whether it was consumer-provided or shared.
-Please distinguish configured services from services actually invoked. Reuse existing service-binding information rather than creating a separate registry.
-Do not add every configured service to every log line. Only include service information when relevant.
-Ensure this works with concurrent consumers, background workers, and service calls that happen outside the initial API request.
-Avoid logging credentials, connection strings, sensitive endpoints, or document contents.
-Keep this compatible with our existing structured JSON logger and Grafana.
-Before implementing, assess whether this can be added cleanly to your proposed logging approach. If it requires significant changes, explain the trade-offs and recommend whether it belongs in this release or a later one.
+Implementation Instructions for Coding Agent — Aiden X Seller Report Mapping
+Objective: Improve the existing Seller Report Mapping workflow to support saving drafts, resuming drafts, editing confirmed mappings, and finalizing new mapping versions.
+Important: Work on top of the existing implementation. Do not redesign the application, rewrite the workflow, or introduce a new architecture. Reuse existing components, APIs, and backend logic wherever possible.
+1. Preserve the existing user interface
+Keep the current Aiden X dark theme and existing page structure.
+Specifically, preserve:
+The Seller Reports landing page.
+The Deal View tabs: Last Mapped Data, Previous Reports, and Client SR Mapping.
+The existing field-mapping table.
+The existing three-pane reconciliation screen: PDF Fields, Excel Template Preview, and Source PDF.
+The current upload and AI mapping workflow.
+On the Client SR Mapping tab, retain the existing horizontal information banner.
+Within that same banner, display:
+Template Name
+Asset Class
+Total Attributes
+Last Modified By and Last Modified Date, combined into one item
+Current mapping status and, when applicable, draft progress
+Remove the redundant Report Name field.
+Do not add separate status cards, multiple horizontal banners, or additional page sections.
+2. Support three mapping states
+The Client SR Mapping page should distinguish between three states.
+State A — No confirmed mapping
+Display Mapping Required.
+The user should be able to select Set Up Mapping, upload PDF reports, and begin the existing reconciliation workflow.
+Do not change the existing monthly-processing status logic unnecessarily.
+State B — Confirmed mapping exists, no active draft
+Display Confirmed Mapping — Active in the existing banner.
+Show the latest confirmed mapping’s modification date and user.
+Display Edit Mapping.
+When the user clicks Edit Mapping, reopen the existing three-pane reconciliation screen with the confirmed mapping loaded.
+All previously accepted, reviewed, and ignored selections must be preserved. Users should only need to review fields they change.
+State C — Draft mapping exists
+Display Draft Mapping — In Progress in the same banner.
+Show the draft’s review progress, such as 40 of 479 fields reviewed or ignored. This is an illustrative count; calculate the actual progress from saved data.
+Display Continue Draft.
+If a confirmed mapping also exists, keep it active for monthly processing while the draft is being edited.
+3. Implement Continue Draft using existing functionality
+The coding investigation confirmed that Edit Mapping already attempts to resume a DraftSaved run.
+Reuse this logic.
+Do not build a separate draft editor or duplicate the reconciliation screen.
+When Continue Draft is clicked:
+Open the existing three-pane reconciliation screen.
+Restore the saved PDF references and mapping candidates.
+Restore accepted, reviewed, and ignored fields.
+Restore the selected candidates and review progress.
+Allow the user to continue editing.
+The frontend should distinguish mapping drafts from monthly report-processing drafts. Do not reuse the monthly report’s Continue action.
+4. Preserve the existing Save Draft / Save Mapping behavior
+The coding investigation confirmed that the reconciliation screen currently uses one button whose label changes automatically.
+Keep that behavior.
+When some fields remain unreviewed, the button displays Save Draft and saves the current mapping without activating it.
+When every field is reviewed or explicitly ignored, the button displays Save Mapping and finalizes the mapping.
+Reuse the existing POST /srm/update-markers endpoint and its isDraft behavior.
+Do not create new endpoints unless an actual capability gap requires one.
+Ensure the button is disabled appropriately while data is loading or saving, and provide clear feedback after successful saves.
+5. Handle mapping versions correctly
+A confirmed mapping represents the currently active version.
+When a user clicks Edit Mapping, the existing confirmed version becomes the starting point for the next set of changes.
+Saving a draft must not modify or deactivate the confirmed mapping.
+When the user finalizes the draft:
+Save the new confirmed mapping version.
+Make that version active.
+Deactivate the previous confirmed version without deleting its historical artifacts.
+Clear the current draft state from the user interface.
+Update Last Modified By and Last Modified Date to reflect the newly finalized version.
+Restore the Edit Mapping action.
+Users must be able to repeat this cycle indefinitely.
+Confirmed Version 1 → Edit → Draft → Finalize → Confirmed Version 2 → Edit → Draft → Finalize → Confirmed Version 3.
+The interface only needs to expose the current draft and current confirmed version. Do not introduce a version-history screen in this change.
+6. Fix the identified edge cases
+The coding investigation identified two potential problems.
+First: Silent fallback to the legacy editor.
+Currently, the reconciliation workflow can fall back to the older draft mechanism if it cannot find the expected SRM run.
+This can result in a different editor without the expected PDF highlighting.
+Do not allow this fallback to happen silently. Preserve any legitimate legacy workflows, but make sure users editing an SRM mapping either reopen the correct mapping or receive a clear error.
+Second: Potential stale mapping candidates.
+The investigation identified a possible issue in rowsToMarkerUpdates and the backend merge behavior.
+If a field’s selected candidate is cleared, an empty SellerReport list may be interpreted as no change rather than an instruction to remove the previous selection.
+Verify this behavior through testing. If confirmed, fix the update semantics so explicitly cleared selections do not leave stale candidates behind.
+Do not change unrelated mapping logic.
+7. Preserve monthly report processing
+Mapping setup and monthly report processing are separate workflows.
+Saving a mapping draft must never affect monthly processing.
+Monthly processing must continue using the latest active confirmed mapping.
+When a new mapping version is finalized, it should be used for subsequent processing. Previously completed monthly reports and their workbook overlays must remain unchanged.
+Do not modify the existing monthly report-processing workflow unless necessary to preserve this behavior.
+8. Reuse the existing code paths
+Start by inspecting the existing implementations, including:
+src/app/apps/seller-report/_mapping-upload-flow.tsx
+src/app/apps/seller-report/_field-mapping-summary.tsx
+Existing mapper status and output hooks.
+rowsToMarkerUpdates
+Backend apply_marker_updates
+Existing DraftSaved and MapperDocsReady handling.
+Existing active confirmed mapping lookup.
+These are starting points identified during the investigation, not instructions to replace them.
+Prefer small, targeted changes.
+9. Test the complete workflow
+Before declaring the implementation complete, verify these scenarios:
+A new deal without a confirmed mapping can enter the existing setup workflow.
+A user can review some fields, save a draft, navigate away, and reopen it through Continue Draft.
+Reopening a draft restores the exact selected candidates and reviewed or ignored states.
+Editing a confirmed mapping preserves previously reviewed and ignored fields.
+Changing a small number of fields does not require reviewing all 479 fields again.
+Finalizing a mapping activates the new version and clears the current draft state.
+The Client SR Mapping banner updates its status, modification details, and available action correctly.
+A user can click Edit Mapping again and create the next version.
+Saving a draft does not affect the active confirmed mapping or monthly processing.
+Clearing a selected candidate does not leave stale mapping data.
+Missing SRM runs do not silently redirect users to an unintended legacy editor.
+Use the project’s existing test framework. Add focused regression tests for the changed behavior.
+10. Implementation boundaries and reporting
+Do not redesign the landing page, introduce new tabs, change the visual theme, replace the three-pane editor, or refactor unrelated code.
+Before changing behavior that is ambiguous, inspect the current implementation and choose the smallest compatible solution. If a decision could alter existing business behavior, report it rather than making an unsupported assumption.
+After implementation, provide:
+The files changed and why.
+What existing functionality was reused.
+Any backend changes.
+The test cases executed and their results.
+Any unresolved issues or assumptions.
+Expected result: A user can create a mapping, save and resume a draft, finalize it into an active version, and repeatedly edit that confirmed version to produce new versions—all within the existing Aiden X interface, without disrupting monthly report processing.
