@@ -1204,3 +1204,58 @@ Any backend changes.
 The test cases executed and their results.
 Any unresolved issues or assumptions.
 Expected result: A user can create a mapping, save and resume a draft, finalize it into an active version, and repeatedly edit that confirmed version to produce new versions—all within the existing Aiden X interface, without disrupting monthly report processing.
+
+
+
+
+-----
+
+
+You are looking at our DIP repo on this machine, and you already have past conversations and saved memory about this work. Use both. The memories and old chats have the detailed story. Git is how you check dates and what actually landed.
+
+Before you search the code, read your own history
+- Open your saved memory, project notes, and past conversations about DIP, securitization, seller reports, the AI seller-report mapping, the mapping merge, templates, the MCP or KMI server, draft, finalize, and bugs from that merge.
+- Pull the detail from those chats. Do not give me a vague summary of them. Bring the concrete items: what changed, what broke, who asked for it, what we reverted, what we rebuilt, and which bugs the AI seller-report mapping merge introduced.
+- If a past chat names a PR, branch, file, date, or bug, verify it in git. Keep the detail either way.
+- Label every row with its source: memory or past chat, git, or both. If memory and git disagree, show both and say which one you trust.
+- Do not invent. If neither memory nor the repo shows it, say "not found."
+
+Where the code lives
+- DIP/ is the engine. Securitization package is under use_cases/securitization (manifest.yaml).
+- Screens are copied between DIP/SECURITIZATION_APP/ and FRONTEND/src/app/apps/securitization/. FRONTEND may not be its own git repo. Also check DIP/FRONTEND_SHARED/.
+- BACKEND/ only checks the user and proxies. Securitization scope is /api/apps/securitization/dip/.
+- Seller-report path in plain words: pick a deal and a month, upload seller-report PDFs, fill a mapping sheet, review, save draft, finish, download Excel. Templates are filled by named cells (NamedCellXlsxPopulator / template adapter). Mapping is the link from PDF fields to those template cells.
+- Search terms: seller report, seller-report, securitization, mapping, mapper, ai mapping, AI seller report mapping, template, CSR template, named cell, draft, finalize, MCP, KMI, KME.
+
+Date range
+- Main window: 1 Aug 2026 through today.
+- Also find the first securitization / seller-report commits if they start earlier (June 2026 is likely). List those only as a start date, then focus the sheet on August onward.
+
+What I need
+1. Our changes. From memory and from git: landing page, month rules, draft / download / finalize, mapper, template pull, MCP or database integration. One line each: date, author, PR or commit, what changed in plain words.
+2. The AI seller-report mapping merge. Find the merge (or merges) that brought in the AI seller report mapping. Your past chats should already describe this. Name the branch, date, PR, and author. This merge introduced a lot of bugs. Pinpoint that merge. Do not blend it into general work. List the bugs the old chats say it caused, then confirm each one in the follow-up commits.
+3. Bugs that merge caused. From memory, PR comments, reverts, and fixes after that merge, list what broke. Check these only if memory or the code shows them: mapping wrong or missing, template name empty, empty template not pulled, wrong report status (not started vs draft vs finalized), macros dropped on xls vs xlsm, month default wrong, extra columns missing, local snapshot vs live MCP data, delete-and-reprocess, concurrency on save-draft. Mark each as shown in git, remembered but not in the repo, or not found.
+4. Fixes after that merge. For each bug, the later commit or PR that fixed it, the date, and one plain sentence on the fix. If a bug is still open, say so. If a past chat explains the fix better than the commit message, include that sentence and cite the chat.
+5. Scope that was still moving. Note any change to the contract with the backend or MCP: new columns, new ids (CSR template id), switching off a local snapshot, pulling a live template, removing an "extract everything" path, writing back to the KMI database.
+
+How to search the repo
+- git log --since=2026-06-01 --merges, and a normal log across DIP, BACKEND, and the securitization app paths.
+- Search PR titles and bodies, not just commit subjects.
+- Prefer the merge commit and its follow-up fixes over a huge diff.
+- Do not paste large diffs. Do not quote code.
+
+Output this sheet and nothing else. Use these columns:
+
+| Date | Type | Where | What changed or broke | Evidence | Source | Status |
+
+Type is one of: our change, mapping merge, bug from mapping merge, fix, contract change.
+Where is one of: DIP engine, securitization UI, backend proxy, template/mapping, MCP or KMI data.
+Evidence is a PR, commit, file, or the past chat you took it from.
+Source is one of: memory, past chat, git, or both.
+Status is one of: done, fixed, still open, not in the repo.
+
+After the table:
+- 5 to 8 sentences I can say out loud. Lead with the mapping merge: when it landed, what it broke, and what we fixed after it.
+- The detailed points from your past chats that did not make the table, so I do not lose them.
+- A short list of bugs you could not tie to a commit.
+- Do not propose new work. Do not open tickets.
