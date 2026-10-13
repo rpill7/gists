@@ -1287,22 +1287,29 @@ Provide exact file names and function references. Do not implement anything unti
 
 ---=========-----
 
-Thanks for the detailed investigation. Option B looks like the right long-term direction, particularly since we already persist the document's object_key in PostgreSQL before queuing the worker.
+You're right that **DIP is our document-processing engine**, and that's the application we're investigating.
 
-Before implementing anything, I want to validate the proposed design against our existing architecture.
+But there's an important distinction\:
 
-Please review the following:
+- **DIP pod\:** Runs the document-processing application and produces the error logs.
+- **Loki\:** A central system that may collect and retain those logs even after a DIP pod restarts or gets replaced.
+- **Grafana\:** A way to search and view those collected logs.
 
-1. Confirm how all four packages currently use the ECS envelope and whether any other processing paths depend on it.
-2. Validate whether we can reuse the existing PostgreSQL tables and database transaction support rather than introducing unnecessary changes.
-3. Confirm that the proposed solution preserves retry, resume, recovery, duplicate submission, and multi-document processing behavior.
-4. Review the database migration and backward compatibility, particularly for existing jobs and jobs already in progress during deployment.
-5. Confirm whether reading the processing metadata from PostgreSQL eliminates the failure at worker startup without affecting subsequent document retrieval from ECS.
-6. Identify any additional database load or performance impact from this change.
-7. Review the existing test coverage and identify what additional tests are required.
+We are **not proposing to deploy Loki inside DIP or add another pod to the document-processing engine**\.
 
-Also, please retrieve the original error details for AIXL-333 and AIXL-355 from Loki, if accessible, before treating them as the same issue.
+The second investigation found that DIP already has `cf.rbc.com/logging-enabled=true`, which indicates its logs are being forwarded to the central logging system.
 
-For now, this is a read-only review. Do not modify the code or database schema.
+### Why does this matter?
+
+Previously, the coding agent claimed the logs were lost when the DIP pod was replaced. The deeper investigation corrected that finding: the logs may still be available centrally.
+
+So we have two separate tasks\:
+
+1. **Find the original error\:** Check DIP's existing logs, using `kubectl logs` for the current pod or central logs for older pods.
+2. **Fix the architecture\:** Evaluate Option B, moving the processing envelope into PostgreSQL so worker startup no longer depends on an immediate ECS read.
+
+**My suggestion\:** Don't spend time changing logging infrastructure. Focus on Option B. We can use existing logs to confirm the exact error, but we shouldn't make Loki a requirement for moving forward with the design review.
+
+One question: Is your concern that the coding agent is investigating infrastructure outside DIP, rather than focusing on fixing the DIP application itself?
 
 Once completed, provide a clear implementation plan, affected files, risks, testing approach, and recommended deployment sequence for my approval.
