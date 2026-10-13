@@ -1210,52 +1210,73 @@ Expected result: A user can create a mapping, save and resume a draft, finalize 
 
 -----
 
+Please perform a **read-only architecture and root-cause review** of AIXL-333 and AIXL-355 in the existing `fad0-dip` codebase. Do not modify any code.
 
-You are looking at our DIP repo on this machine, and you already have past conversations and saved memory about this work. Use both. The memories and old chats have the detailed story. Git is how you check dates and what actually landed.
+We have already established that uploads are stored in corporate ECS, an envelope JSON file contains `object_key`, PostgreSQL holds the job queue, and the worker retrieves the envelope before processing.
 
-Before you search the code, read your own history
-- Open your saved memory, project notes, and past conversations about DIP, securitization, seller reports, the AI seller-report mapping, the mapping merge, templates, the MCP or KMI server, draft, finalize, and bugs from that merge.
-- Pull the detail from those chats. Do not give me a vague summary of them. Bring the concrete items: what changed, what broke, who asked for it, what we reverted, what we rebuilt, and which bugs the AI seller-report mapping merge introduced.
-- If a past chat names a PR, branch, file, date, or bug, verify it in git. Keep the detail either way.
-- Label every row with its source: memory or past chat, git, or both. If memory and git disagree, show both and say which one you trust.
-- Do not invent. If neither memory nor the repo shows it, say "not found."
+I want you to challenge the current solution and determine whether we can permanently eliminate the failure rather than simply increasing retries.
 
-Where the code lives
-- DIP/ is the engine. Securitization package is under use_cases/securitization (manifest.yaml).
-- Screens are copied between DIP/SECURITIZATION_APP/ and FRONTEND/src/app/apps/securitization/. FRONTEND may not be its own git repo. Also check DIP/FRONTEND_SHARED/.
-- BACKEND/ only checks the user and proxies. Securitization scope is /api/apps/securitization/dip/.
-- Seller-report path in plain words: pick a deal and a month, upload seller-report PDFs, fill a mapping sheet, review, save draft, finish, download Excel. Templates are filled by named cells (NamedCellXlsxPopulator / template adapter). Mapping is the link from PDF fields to those template cells.
-- Search terms: seller report, seller-report, securitization, mapping, mapper, ai mapping, AI seller report mapping, template, CSR template, named cell, draft, finalize, MCP, KMI, KME.
+**1. Envelope storage**
 
-Date range
-- Main window: 1 Aug 2026 through today.
-- Also find the first securitization / seller-report commits if they start earlier (June 2026 is likely). List those only as a start date, then focus the sheet on August onward.
+- Why is the envelope JSON stored in ECS instead of directly in the PostgreSQL job record?
+- What fields does the envelope contain?
+- Which fields are required to start processing?
+- Does the envelope contain sensitive or large data that makes database storage unsuitable?
+- Is the envelope ever updated or overwritten after initial creation?
+- Can two requests write to the same envelope key?
+- Does the code validate the complete envelope contents before enqueueing?
+- Does the existing write verification use HEAD only, or does it verify the actual JSON body and checksum?
 
-What I need
-1. Our changes. From memory and from git: landing page, month rules, draft / download / finalize, mapper, template pull, MCP or database integration. One line each: date, author, PR or commit, what changed in plain words.
-2. The AI seller-report mapping merge. Find the merge (or merges) that brought in the AI seller report mapping. Your past chats should already describe this. Name the branch, date, PR, and author. This merge introduced a lot of bugs. Pinpoint that merge. Do not blend it into general work. List the bugs the old chats say it caused, then confirm each one in the follow-up commits.
-3. Bugs that merge caused. From memory, PR comments, reverts, and fixes after that merge, list what broke. Check these only if memory or the code shows them: mapping wrong or missing, template name empty, empty template not pulled, wrong report status (not started vs draft vs finalized), macros dropped on xls vs xlsm, month default wrong, extra columns missing, local snapshot vs live MCP data, delete-and-reprocess, concurrency on save-draft. Mark each as shown in git, remembered but not in the repo, or not found.
-4. Fixes after that merge. For each bug, the later commit or PR that fixed it, the date, and one plain sentence on the fix. If a bug is still open, say so. If a past chat explains the fix better than the commit message, include that sentence and cite the chat.
-5. Scope that was still moving. Note any change to the contract with the backend or MCP: new columns, new ids (CSR template id), switching off a local snapshot, pulling a live template, removing an "extract everything" path, writing back to the KMI database.
+**2. PostgreSQL and worker**
 
-How to search the repo
-- git log --since=2026-06-01 --merges, and a normal log across DIP, BACKEND, and the securitization app paths.
-- Search PR titles and bodies, not just commit subjects.
-- Prefer the merge commit and its follow-up fixes over a huge diff.
-- Do not paste large diffs. Do not quote code.
+- Inspect the existing `job_queue` schema and worker implementation.
+- Can `object_key` and the required processing metadata be stored in the database?
+- Can the job details and queue entry be committed in the same transaction?
+- Would this eliminate the immediate ECS envelope read?
+- What would need to change in retry, resume, recovery, and duplicate-submission handling?
+- Identify all existing clients or workflows that depend on the current envelope.
 
-Output this sheet and nothing else. Use these columns:
+**3. ECS storage behavior**
 
-| Date | Type | Where | What changed or broke | Evidence | Source | Status |
+- Determine whether ECS supports reliable read-after-write consistency for this bucket.
+- Can the same object key return different contents across successive GET requests?
+- Does the storage client reuse connections?
+- Could a stale cache, reused object key, or concurrent overwrite explain the missing `object_key`?
+- Can we compare the envelope returned immediately after PUT with the envelope returned by the worker?
+- What evidence would distinguish an ECS visibility issue from a code-level overwrite or serialization issue?
 
-Type is one of: our change, mapping merge, bug from mapping merge, fix, contract change.
-Where is one of: DIP engine, securitization UI, backend proxy, template/mapping, MCP or KMI data.
-Evidence is a PR, commit, file, or the past chat you took it from.
-Source is one of: memory, past chat, git, or both.
-Status is one of: done, fixed, still open, not in the repo.
+Do not label any cause as confirmed unless the evidence demonstrates it.
 
-After the table:
-- 5 to 8 sentences I can say out loud. Lead with the mapping merge: when it landed, what it broke, and what we fixed after it.
-- The detailed points from your past chats that did not make the table, so I do not lose them.
-- A short list of bugs you could not tie to a commit.
-- Do not propose new work. Do not open tickets.
+**4. AIXL-355 error handling**
+
+- Trace where `diagnostic_detail` is created, stored, and retrieved.
+- Determine whether the exact failed operation can be investigated using an authorized administrator.
+- Check whether application logs survive Kubernetes pod replacement.
+- Identify whether we can add stable, non-sensitive error categories without exposing internal details to business users.
+- Identify which errors should retry automatically and which should fail immediately.
+
+**5. Compare solutions**
+
+Evaluate these three options:
+
+A. Keep the current design and improve GET verification, retries, and monitoring.
+
+B. Store the required envelope metadata in PostgreSQL and let the worker retrieve it from there.
+
+C. Keep the ECS envelope but use immutable object keys, content verification, and an explicit ready state.
+
+For each option, explain:
+- Which failure it prevents
+- Which failures can still happen
+- Required code changes
+- Risks to existing workflows
+- Expected effect on processing time
+- Whether it is a short-term or long-term solution
+
+**6. Final recommendation**
+
+Recommend the safest solution for a shared document-processing engine used by multiple applications.
+
+Distinguish confirmed findings, reasonable hypotheses, and unknowns.
+
+Provide exact file names and function references. Do not implement anything until I approve the plan.
