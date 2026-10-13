@@ -1285,16 +1285,24 @@ Provide exact file names and function references. Do not implement anything unti
 
 
 
----=========
+---=========-----
 
-Let's focus exclusively on the DIP root-cause investigation for AIXL-333 and AIXL-355.
+Thanks for the detailed investigation. Option B looks like the right long-term direction, particularly since we already persist the document's object_key in PostgreSQL before queuing the worker.
 
-Please proceed with the read-only architecture review we discussed, including the ECS envelope storage, PostgreSQL job queue, storage consistency, and retry handling.
+Before implementing anything, I want to validate the proposed design against our existing architecture.
 
-My goal is to identify a reliable long-term fix rather than simply increasing retries.
+Please review the following:
 
-Compare the three proposed solutions (A/B/C), challenge the existing implementation, and recommend the safest approach with minimal changes to the current architecture.
+1. Confirm how all four packages currently use the ECS envelope and whether any other processing paths depend on it.
+2. Validate whether we can reuse the existing PostgreSQL tables and database transaction support rather than introducing unnecessary changes.
+3. Confirm that the proposed solution preserves retry, resume, recovery, duplicate submission, and multi-document processing behavior.
+4. Review the database migration and backward compatibility, particularly for existing jobs and jobs already in progress during deployment.
+5. Confirm whether reading the processing metadata from PostgreSQL eliminates the failure at worker startup without affecting subsequent document retrieval from ECS.
+6. Identify any additional database load or performance impact from this change.
+7. Review the existing test coverage and identify what additional tests are required.
 
-Do not modify any code yet. Once the investigation is complete, provide your findings and proposed implementation plan for my review.
+Also, please retrieve the original error details for AIXL-333 and AIXL-355 from Loki, if accessible, before treating them as the same issue.
 
-Ignore the Aiden X Seller Report mapping work for now. That is a separate task.
+For now, this is a read-only review. Do not modify the code or database schema.
+
+Once completed, provide a clear implementation plan, affected files, risks, testing approach, and recommended deployment sequence for my approval.
