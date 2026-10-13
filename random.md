@@ -1280,3 +1280,21 @@ Recommend the safest solution for a shared document-processing engine used by mu
 Distinguish confirmed findings, reasonable hypotheses, and unknowns.
 
 Provide exact file names and function references. Do not implement anything until I approve the plan.
+
+
+
+
+
+---=========
+
+Let's focus exclusively on the DIP root-cause investigation for AIXL-333 and AIXL-355.
+
+Please proceed with the read-only architecture review we discussed, including the ECS envelope storage, PostgreSQL job queue, storage consistency, and retry handling.
+
+My goal is to identify a reliable long-term fix rather than simply increasing retries.
+
+Compare the three proposed solutions (A/B/C), challenge the existing implementation, and recommend the safest approach with minimal changes to the current architecture.
+
+Do not modify any code yet. Once the investigation is complete, provide your findings and proposed implementation plan for my review.
+
+Ignore the Aiden X Seller Report mapping work for now. That is a separate task.
